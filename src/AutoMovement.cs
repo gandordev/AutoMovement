@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace FortniteAFK.src
+namespace AutoMovement
 {
     static class Program
     {
@@ -34,6 +34,8 @@ namespace FortniteAFK.src
         // Constants for keybd_event
         private const int KEYEVENTF_KEYDOWN = 0x0000;
         private const int KEYEVENTF_KEYUP = 0x0002;
+        private const int DELAY_BEFORE_SPACE_HOLD_SECONDS = 1;
+        private const int SPACE_HOLD_SECONDS = 20;
 
         // Constants for mouse_event
         private const int MOUSEEVENTF_LEFTDOWN = 0x0002;
@@ -54,6 +56,7 @@ namespace FortniteAFK.src
         private DateTime endTime = DateTime.MaxValue;
 
         private bool useStopKey = false;
+        private bool useShutdownOnFinish = false;
         private byte stopKey = VK_ESCAPE;
 
         // List of main keys used in the script that are not suppossed to be used as stop keys
@@ -113,6 +116,7 @@ namespace FortniteAFK.src
         private TextBox txtDuration;
         private CheckBox chkUseDuration;
         private CheckBox chkUseKey;
+        private CheckBox chkShutdownOnFinish;
         private Button btnSelectKey;
         private Button btnStart;
         private Button btnStop;
@@ -136,23 +140,17 @@ namespace FortniteAFK.src
         private void InitializeComponent()
         {
             // Title
-            Text = "Fortnite AFK XP Farm";
+            Text = "AutoMovement";
             Size = new Size(500, 500);
+            Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
 
-            // Icon
-            var assembly = Assembly.GetExecutingAssembly();
-            using (var stream = assembly.GetManifestResourceStream("FortniteAFK.icons.appicon.ico"))
-            {
-                Icon = new Icon(stream);
-            }
-
             // Controls
             Label lblTitle = new Label
             {
-                Text = "Fortnite AFK XP Farm",
+                Text = "AutoMovement",
                 Font = new Font("Arial", 16, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Dock = DockStyle.Top,
@@ -162,7 +160,7 @@ namespace FortniteAFK.src
             Panel panelConfig = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 180,
+                Height = 220,
                 Padding = new Padding(10)
             };
 
@@ -173,7 +171,11 @@ namespace FortniteAFK.src
                 Location = new Point(20, 20),
                 AutoSize = true
             };
-            chkUseDuration.CheckedChanged += (s, e) => txtDuration.Enabled = chkUseDuration.Checked;
+            chkUseDuration.CheckedChanged += (s, e) =>
+            {
+                txtDuration.Enabled = chkUseDuration.Checked;
+                chkShutdownOnFinish.Enabled = chkUseDuration.Checked;
+            };
 
             lblDuration = new Label
             {
@@ -187,7 +189,7 @@ namespace FortniteAFK.src
                 Location = new Point(160, 47),
                 Size = new Size(60, 20),
                 Enabled = false,
-                Text = "60"
+                Text = "240"
             };
 
             // Stop key
@@ -222,7 +224,7 @@ namespace FortniteAFK.src
             btnStart = new Button
             {
                 Text = "Start",
-                Location = new Point(90, 150),
+                Location = new Point(90, 180),
                 Size = new Size(100, 30)
             };
             btnStart.Click += BtnStart_Click;
@@ -230,7 +232,7 @@ namespace FortniteAFK.src
             btnStop = new Button
             {
                 Text = "Stop",
-                Location = new Point(200, 150),
+                Location = new Point(200, 180),
                 Size = new Size(100, 30),
                 Enabled = false
             };
@@ -240,24 +242,32 @@ namespace FortniteAFK.src
             lblStatus = new Label
             {
                 Text = "Status: Stopped",
-                Location = new Point(310, 158),
+                Location = new Point(310, 188),
                 AutoSize = true,
                 ForeColor = Color.Red
+            };
+
+            chkShutdownOnFinish = new CheckBox
+            {
+                Text = "Shut down when maximum duration is reached",
+                Location = new Point(20, 150),
+                AutoSize = true,
+                Enabled = false
             };
 
             // Log
             Label lblLog = new Label
             {
                 Text = "Activity Log:",
-                Location = new Point(20, 198),
+                Location = new Point(20, 268),
                 AutoSize = true
             };
 
             // Console where logs are displayed
             txtLog = new RichTextBox
             {
-                Location = new Point(20, 230),
-                Size = new Size(440, 220),
+                Location = new Point(20, 298),
+                Size = new Size(440, 150),
                 ReadOnly = true,
                 BackColor = Color.Black,
                 ForeColor = Color.LightGreen,
@@ -274,6 +284,7 @@ namespace FortniteAFK.src
             panelConfig.Controls.Add(btnStart);
             panelConfig.Controls.Add(btnStop);  
             panelConfig.Controls.Add(lblStatus);
+            panelConfig.Controls.Add(chkShutdownOnFinish);
             
             // Update the CheckedChanged event to also change the label color
             chkUseKey.CheckedChanged += (s, e) => {
@@ -354,11 +365,13 @@ namespace FortniteAFK.src
 
             // Configure key to stop
             useStopKey = chkUseKey.Checked;
+            useShutdownOnFinish = chkShutdownOnFinish.Checked;
 
             // Update interface
             chkUseDuration.Enabled = false;
             txtDuration.Enabled = false;
             chkUseKey.Enabled = false;
+            chkShutdownOnFinish.Enabled = false;
             btnSelectKey.Enabled = false;
             btnStart.Enabled = false;
             btnStop.Enabled = true;
@@ -368,7 +381,7 @@ namespace FortniteAFK.src
             // Clear log
             txtLog.Clear();
             Log("Starting process...");
-            Log("Click on the Fortnite window and wait 3 seconds...");
+            Log("Click on the target window and wait 3 seconds...");
 
             // Start process
             isRunning = true;
@@ -397,12 +410,17 @@ namespace FortniteAFK.src
 
         private void ExecuteProcess()
         {
-            // Give time for the user to click on the Fortnite window
+            // Give time for the user to click on the target window
             Thread.Sleep(3000);
-            Log("Process started");
 
             try
             {
+                if (isRunning)
+                {
+                    Log("Process started");
+                    PerformInitialSpaceSequence();
+                }
+
                 while (isRunning && DateTime.Now < endTime)
                 {
                     int waitTime = random.Next(3, 31); // Between 3 and 30 seconds
@@ -438,7 +456,9 @@ namespace FortniteAFK.src
                 Log($"Error: {ex.Message}");
             }
 
-            if (DateTime.Now >= endTime)
+            bool maximumTimeReached = isRunning && DateTime.Now >= endTime;
+            isRunning = false;
+            if (maximumTimeReached)
             {
                 Log("Maximum time reached.");
             }
@@ -449,6 +469,7 @@ namespace FortniteAFK.src
                 chkUseDuration.Enabled = true;
                 txtDuration.Enabled = chkUseDuration.Checked;
                 chkUseKey.Enabled = true;
+                chkShutdownOnFinish.Enabled = chkUseDuration.Checked;
                 btnSelectKey.Enabled = chkUseKey.Checked;
                 btnStart.Enabled = true;
                 btnStop.Enabled = false;
@@ -457,6 +478,91 @@ namespace FortniteAFK.src
             }));
 
             Log("Process stopped.");
+
+            if (maximumTimeReached && useShutdownOnFinish)
+            {
+                try
+                {
+                    Log("Shutting down the computer...");
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "shutdown",
+                        Arguments = "/s /t 0",
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Log($"Unable to shut down the computer: {ex.Message}");
+                    Invoke(new Action(() => MessageBox.Show(
+                        $"Unable to shut down the computer: {ex.Message}",
+                        "Shutdown error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error)));
+                }
+            }
+        }
+
+        private void PerformInitialSpaceSequence()
+        {
+            Log($"Initial action: tapping Space twice, waiting {DELAY_BEFORE_SPACE_HOLD_SECONDS} second(s), then holding Space for {SPACE_HOLD_SECONDS} seconds.");
+            keybd_event(VK_SPACE, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            try
+            {
+                Thread.Sleep(100);
+            }
+            finally
+            {
+                keybd_event(VK_SPACE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            }
+
+            if (!isRunning)
+            {
+                return;
+            }
+
+            Thread.Sleep(100);
+            if (!isRunning)
+            {
+                return;
+            }
+
+            keybd_event(VK_SPACE, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            try
+            {
+                Thread.Sleep(100);
+            }
+            finally
+            {
+                keybd_event(VK_SPACE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            }
+
+            if (!isRunning)
+            {
+                return;
+            }
+
+            Thread.Sleep(DELAY_BEFORE_SPACE_HOLD_SECONDS * 1000);
+            if (!isRunning)
+            {
+                return;
+            }
+
+            Log($"Holding Space for {SPACE_HOLD_SECONDS} seconds.");
+            keybd_event(VK_SPACE, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            try
+            {
+                Stopwatch holdTimer = Stopwatch.StartNew();
+                while (isRunning && holdTimer.Elapsed < TimeSpan.FromSeconds(SPACE_HOLD_SECONDS))
+                {
+                    Thread.Sleep(100);
+                }
+            }
+            finally
+            {
+                keybd_event(VK_SPACE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            }
         }
 
         private void PressKey(byte key)
